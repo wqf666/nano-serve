@@ -57,6 +57,7 @@ def run_offline_bench(
     batch_size: int = 8,
     max_batch_tokens: int = 0,
     length_bucket_size: int = 256,
+    prefix_hash_tokens: int = 512,
     preserve_output_order: bool = False,
     use_tqdm: bool = True,
 ) -> tuple[list[dict], float, dict]:
@@ -78,6 +79,7 @@ def run_offline_bench(
         batch_size=batch_size,
         max_batch_tokens=max_batch_tokens,
         length_bucket_size=length_bucket_size,
+        prefix_hash_tokens=prefix_hash_tokens,
     )
 
     # Reorder requests according to plan

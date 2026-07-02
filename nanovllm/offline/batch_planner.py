@@ -246,12 +246,24 @@ def plan_length_bucket_token_budget(requests: list, estimator: TokenEstimator, *
 # Registry
 # ---------------------------------------------------------------------------
 
+
+from nanovllm.offline.prefix_planner import (
+    plan_prefix_grouped,
+    plan_prefix_then_length_bucket,
+    plan_prefix_then_token_budget,
+    plan_prefix_then_length_bucket_token_budget,
+)
+
 PLANNER_REGISTRY = {
     "fcfs": plan_fcfs,
     "length_sorted": plan_length_sorted,
     "length_bucket": plan_length_bucket,
     "token_budget": plan_token_budget,
     "length_bucket_token_budget": plan_length_bucket_token_budget,
+    "prefix_grouped": plan_prefix_grouped,
+    "prefix_then_length_bucket": plan_prefix_then_length_bucket,
+    "prefix_then_token_budget": plan_prefix_then_token_budget,
+    "prefix_then_length_bucket_token_budget": plan_prefix_then_length_bucket_token_budget,
 }
 
 
