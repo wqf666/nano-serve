@@ -1,0 +1,38 @@
+{
+  "fp8_available": true,
+  "results": {
+    "fp16": {
+      "original_bytes": 655360,
+      "quantized_bytes": 655360,
+      "saving_ratio": 0.0,
+      "max_abs_error": 0.0,
+      "avg_abs_error": 0.0,
+      "total_blocks_written": 5,
+      "total_blocks_read": 5,
+      "total_quant_time_s": 0.0,
+      "total_dequant_time_s": 0.0
+    },
+    "int8": {
+      "original_bytes": 655360,
+      "quantized_bytes": 327700,
+      "saving_ratio": 0.5,
+      "max_abs_error": 0.015625,
+      "avg_abs_error": 0.00764198,
+      "total_blocks_written": 5,
+      "total_blocks_read": 5,
+      "total_quant_time_s": 0.1384,
+      "total_dequant_time_s": 0.0004
+    },
+    "fp8": {
+      "original_bytes": 655360,
+      "quantized_bytes": 327680,
+      "saving_ratio": 0.5,
+      "max_abs_error": 0.125,
+      "avg_abs_error": 0.01793823,
+      "total_blocks_written": 5,
+      "total_blocks_read": 5,
+      "total_quant_time_s": 0.0005,
+      "total_dequant_time_s": 0.0013
+    }
+  }
+}
