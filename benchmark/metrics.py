@@ -71,8 +71,12 @@ def _percentile(values: list[float], p: float) -> float | None:
     return sorted_vals[idx]
 
 
-def compute_summary(records: list[RequestRecord], wall_time: float) -> dict:
-    """Compute benchmark summary from request records."""
+def compute_summary(records: list[RequestRecord], wall_time: float,
+                    target_ttft: float = 0.0, target_itl: float = 0.0) -> dict:
+    """Compute benchmark summary from request records.
+
+    If target_ttft/target_itl are 0, auto-compute from P50 * 1.2.
+    """
     successful = [r for r in records if r.success]
     failed = [r for r in records if not r.success]
 
@@ -83,6 +87,27 @@ def compute_summary(records: list[RequestRecord], wall_time: float) -> dict:
     e2es = [r.e2e for r in successful if r.e2e is not None]
 
     total_output_tokens = sum(r.output_tokens for r in successful)
+
+    # Auto-compute SLO targets from baseline P50 if not specified
+    p50_ttft = _percentile(ttfts, 50) if ttfts else 0
+    p50_itl = _percentile(all_itls, 50) if all_itls else 0
+    if target_ttft <= 0 and p50_ttft:
+        target_ttft = p50_ttft * 1.2
+    if target_itl <= 0 and p50_itl:
+        target_itl = p50_itl * 1.2
+
+    # SLO violation rates
+    ttft_violations = sum(1 for t in ttfts if t > target_ttft) if target_ttft > 0 else 0
+    itl_violations = sum(1 for t in all_itls if t > target_itl) if target_itl > 0 else 0
+    ttft_violation_rate = round(ttft_violations / max(len(ttfts), 1), 4)
+    itl_violation_rate = round(itl_violations / max(len(all_itls), 1), 4)
+    # Goodput: fraction of requests meeting both SLOs
+    good_requests = sum(
+        1 for r in successful
+        if (r.ttft is not None and r.ttft <= target_ttft)
+        and all(itl <= target_itl for itl in r.itls)
+    ) if target_ttft > 0 and target_itl > 0 else len(successful)
+    goodput = round(good_requests / max(len(successful), 1), 4)
 
     return {
         "num_requests": len(records),
@@ -105,4 +130,11 @@ def compute_summary(records: list[RequestRecord], wall_time: float) -> dict:
         "total_output_tokens": total_output_tokens,
         "throughput_tokens_per_s": round(total_output_tokens / wall_time, 2) if wall_time > 0 else 0,
         "throughput_requests_per_s": round(len(successful) / wall_time, 2) if wall_time > 0 else 0,
+        "slo": {
+            "target_ttft": round(target_ttft, 6),
+            "target_itl": round(target_itl, 6),
+            "ttft_violation_rate": ttft_violation_rate,
+            "itl_violation_rate": itl_violation_rate,
+            "goodput": goodput,
+        },
     }

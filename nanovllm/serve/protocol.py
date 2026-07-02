@@ -11,6 +11,7 @@ class CompletionRequest(BaseModel):
     temperature: float = 1.0
     stream: bool = False
     ignore_eos: bool = False
+    priority: int = 1  # 0=low, 1=normal, 2=high
 
 
 class CompletionChoice(BaseModel):

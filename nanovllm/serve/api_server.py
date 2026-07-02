@@ -48,6 +48,7 @@ async def startup():
             "max_prefill_chunk_size": args.max_prefill_chunk_size,
             "min_prefill_chunk_size": args.min_prefill_chunk_size,
         },
+        max_queue_depth=args.max_queue_depth,
         enforce_eager=args.enforce_eager,
         max_model_len=args.max_model_len,
         tensor_parallel_size=args.tensor_parallel_size,
@@ -68,7 +69,19 @@ async def shutdown():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    """Health check with capacity info for upstream load balancers."""
+    status = {"status": "ok"}
+    if engine:
+        status["capacity"] = engine.get_capacity()
+    return status
+
+
+@app.get("/metrics")
+async def metrics():
+    """Return current KV cache, prefix cache, and scheduler metrics."""
+    if not engine or not engine.metrics_collector:
+        return {"error": "metrics not available"}
+    return engine.metrics_collector.snapshot()
 
 
 @app.get("/v1/models")
@@ -88,6 +101,19 @@ async def list_models():
 
 @app.post("/v1/completions")
 async def completions(request: CompletionRequest):
+    # Admission control: reject if overloaded
+    if engine:
+        cap = engine.get_capacity()
+        if not cap["accepting"]:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Server overloaded",
+                    "capacity": cap,
+                    "retry_after_ms": 500,
+                },
+            )
+
     request_id = tracker.add_request(request_id="")  # will be set below
 
     # Build sampling params
@@ -97,8 +123,8 @@ async def completions(request: CompletionRequest):
         ignore_eos=request.ignore_eos,
     )
 
-    # Submit to engine
-    req_id = await engine.add_request(request.prompt, sp)
+    # Submit to engine with priority
+    req_id = await engine.add_request(request.prompt, sp, priority=request.priority)
     tracker._requests.pop(request_id.request_id, None)  # remove temp
     info = tracker.add_request(req_id)
 
@@ -167,11 +193,8 @@ def main():
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument(
         "--scheduler", type=str, default=None,
-        choices=["builtin", "fcfs", "decode_first", "chunked_prefill"],
-        help="Scheduler to use. 'builtin' = original engine scheduler, "
-             "'fcfs' = FCFS, 'decode_first' = decode-priority, "
-             "'chunked_prefill' = token-budget chunked prefill. "
-             "Default: None (uses builtin).",
+        choices=["builtin", "fcfs", "decode_first", "chunked_prefill", "slo_aware", "priority"],
+        help="Scheduler to use. Default: None (uses builtin).",
     )
     parser.add_argument(
         "--max-prefill-chunk-size", type=int, default=512,
@@ -180,6 +203,10 @@ def main():
     parser.add_argument(
         "--min-prefill-chunk-size", type=int, default=64,
         help="Min tokens per prefill chunk (for chunked_prefill scheduler).",
+    )
+    parser.add_argument(
+        "--max-queue-depth", type=int, default=256,
+        help="Max concurrent requests before admission control rejects with 429.",
     )
     args = parser.parse_args()
 

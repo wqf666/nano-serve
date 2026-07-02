@@ -60,6 +60,11 @@ class OnlineEngine(LLMEngine):
             self.scheduler = new_scheduler
             logger.info(f"Scheduler swapped to: {scheduler_name}")
 
+        # Attach metrics collector (works with any scheduler)
+        from nanovllm.metrics.metrics_collector import MetricsCollector
+        self.metrics_collector = MetricsCollector()
+        self.metrics_collector.attach(self.scheduler.block_manager, self.scheduler)
+
     def step(self):
         """Run one engine step.
 
@@ -76,6 +81,11 @@ class OnlineEngine(LLMEngine):
 
         # Execute the standard step (schedule → model forward → postprocess)
         finished_outputs, num_tokens = super().step()
+
+        # Record step metrics
+        is_prefill = num_tokens > 0
+        step_num_seqs = abs(num_tokens) if is_prefill else abs(num_tokens)
+        self.metrics_collector.record_step(is_prefill, step_num_seqs, abs(num_tokens))
 
         # After step: extract newly generated tokens per sequence
         new_tokens: dict[int, list[int]] = {}
@@ -100,7 +110,8 @@ class AsyncEngine:
     """Async wrapper around OnlineEngine with background step loop."""
 
     def __init__(self, model: str, scheduler_name: str | None = None,
-                 scheduler_params: dict | None = None, **kwargs):
+                 scheduler_params: dict | None = None,
+                 max_queue_depth: int = 256, **kwargs):
         self.engine = OnlineEngine(
             model, scheduler_name=scheduler_name,
             scheduler_params=scheduler_params, **kwargs
@@ -108,6 +119,8 @@ class AsyncEngine:
         self.model_name = model.rstrip("/").split("/")[-1]
         self.scheduler_name = self.engine._scheduler_name
         self.tokenizer = self.engine.tokenizer
+        self.metrics_collector = self.engine.metrics_collector
+        self.max_queue_depth = max_queue_depth
         self._request_counter = 0
         self._token_queues: dict[str, asyncio.Queue] = {}
         self._seq_to_request: dict[int, str] = {}  # seq_id → request_id
@@ -131,14 +144,36 @@ class AsyncEngine:
         self.engine.exit()
 
     async def add_request(
-        self, prompt: str, sampling_params: SamplingParams
+        self, prompt: str, sampling_params: SamplingParams, priority: int = 1
     ) -> str:
         """Submit a generation request. Returns request_id."""
         self._request_counter += 1
         request_id = f"req-{self._request_counter}-{time.time():.6f}"
         self._token_queues[request_id] = asyncio.Queue()
-        self._pending_add.append((request_id, prompt, sampling_params))
+        self._pending_add.append((request_id, prompt, sampling_params, priority))
         return request_id
+
+    def get_capacity(self) -> dict:
+        """Return current engine load for admission control decisions."""
+        sched = self.engine.scheduler
+        bm = sched.block_manager
+        waiting = len(sched.waiting) + len(self._pending_add)
+        running = len(sched.running)
+        total_active = waiting + running
+        total_blocks = len(bm.blocks)
+        used_blocks = len(bm.used_block_ids)
+
+        return {
+            "waiting": waiting,
+            "running": running,
+            "total_active": total_active,
+            "max_queue_depth": self.max_queue_depth,
+            "queue_utilization": round(total_active / max(self.max_queue_depth, 1), 4),
+            "kv_blocks_used": used_blocks,
+            "kv_blocks_total": total_blocks,
+            "kv_utilization": round(used_blocks / max(total_blocks, 1), 4),
+            "accepting": total_active < self.max_queue_depth,
+        }
 
     async def generate_stream(self, request_id: str):
         """Async generator yielding (token_text, is_end) tuples."""
@@ -163,7 +198,13 @@ class AsyncEngine:
             try:
                 # Drain pending add_request calls
                 while self._pending_add:
-                    request_id, prompt, sp = self._pending_add.popleft()
+                    item = self._pending_add.popleft()
+                    request_id, prompt, sp, priority = item
+
+                    # Set priority on scheduler before add_request
+                    sched = self.engine.scheduler
+                    if hasattr(sched, 'set_next_priority'):
+                        sched.set_next_priority(priority)
 
                     # add_request runs in executor (may trigger CUDA ops)
                     loop = asyncio.get_running_loop()

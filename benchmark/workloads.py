@@ -39,12 +39,16 @@ _SENTENCES = [
     "Transformer architectures use positional encoding to track token order.",
 ]
 
+# Long shared system prompt (~600 tokens / ~2400 chars)
+# Must fill at least 2 full blocks (block_size=256) for prefix cache to work.
 _SHARED_SYSTEM_PROMPT = (
     "You are a knowledgeable AI assistant specialized in computer science, "
     "machine learning, and software engineering. You provide clear, concise, "
     "and accurate answers. You always explain technical concepts with examples "
-    "and reference relevant research when appropriate. You are helpful and "
-    "patient with follow-up questions."
+    "and reference relevant research when appropriate. "
+    + " ".join(_SENTENCES)  # ~350 tokens of shared context
+    + " " + " ".join(_SENTENCES)  # repeat to reach ~700 tokens
+    + " Now please answer the following question carefully."
 )
 
 _QUESTIONS = [

@@ -2,11 +2,15 @@ from nanovllm.scheduler.base import BaseScheduler, SchedulingBudget, RequestStat
 from nanovllm.scheduler.fcfs import FCFSScheduler
 from nanovllm.scheduler.decode_first import DecodeFirstScheduler
 from nanovllm.scheduler.chunked_prefill import ChunkedPrefillScheduler
+from nanovllm.scheduler.slo_aware import SLOAwareScheduler
+from nanovllm.scheduler.priority import PriorityScheduler
 
 SCHEDULER_REGISTRY: dict[str, type[BaseScheduler]] = {
     "fcfs": FCFSScheduler,
     "decode_first": DecodeFirstScheduler,
     "chunked_prefill": ChunkedPrefillScheduler,
+    "slo_aware": SLOAwareScheduler,
+    "priority": PriorityScheduler,
 }
 
 
